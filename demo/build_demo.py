@@ -132,11 +132,19 @@ def capture():
     print("Booting the demo headless with an RTL8139 + packet dump...")
     proc = subprocess.Popen([qemu, "-display", "none", "-kernel", ELF,
                              *_qemu_net_args()])
-    # The kernel transmits within milliseconds of boot; give it a moment, then
-    # stop QEMU. (No sleep import games — a short wait via communicate timeout.)
-    try:
-        proc.wait(timeout=4)
-    except subprocess.TimeoutExpired:
+    # The kernel transmits within milliseconds of boot, but a cold QEMU (first
+    # launch after install, Defender scanning the binary) can take seconds just
+    # to start. So poll for the frame rather than guessing a fixed window: stop
+    # as soon as the pcap holds a packet, and cap the wait at 20s.
+    import time
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            break                      # QEMU exited (likely a bad arg)
+        if os.path.exists(PCAP) and os.path.getsize(PCAP) > 24:
+            break                      # a frame landed — pcap grew past its header
+        time.sleep(0.25)
+    if proc.poll() is None:
         proc.terminate()
         try:
             proc.wait(timeout=5)

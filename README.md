@@ -6,16 +6,18 @@
 
 **mortnet** is a network stack for [MORT OS](https://github.com/0xmortuex/MortOS), written from scratch in [Mort](https://github.com/0xmortuex/Mort). No lwIP port, no borrowed stack, no library — every byte from the Ethernet frame up gets parsed by code I wrote, in a language I wrote.
 
-**Status: M1 landed** ✅ · started 2026-07-21 · MORT OS transmits real Ethernet frames
+**Status: M2 landed** ✅ · started 2026-07-21 · MORT OS speaks ARP, IPv4 and ICMP — it pings, and it answers pings
 
-<img src="docs/m1-capture.svg" width="880" alt="Packet capture: the 21-byte Ethernet frame MORT OS transmitted through the RTL8139 — broadcast destination, the card's own MAC as source, EtherType 0x88B5, payload MORTNET." />
+<img src="docs/m2-ping.svg" width="880" alt="A captured ping exchange: MORT OS broadcasts an ARP request, receives the reply, sends an ICMP echo request with payload mortnet!, and receives the echo reply — all four frames real, from build/capture.pcap." />
 
-<sub>An actual frame captured from QEMU (`build/capture.pcap`, dumped with `-object filter-dump`). The source MAC is the card's own hardware address, read back from its registers by the driver.</sub>
+<sub>An actual ping, captured from QEMU (`build/capture.pcap`). MORT OS finds the gateway by ARP, then completes an ICMP round trip — the RX ring parses both replies. `net_handle_frame` also answers inbound ARP and pings (proven by host tests against real request bytes).</sub>
 
 ```sh
-python test/run_tests.py         # host: 31 golden checks (endian, checksum, buf, eth)
+python test/run_tests.py         # host: 57 golden checks (endian, checksum, buf,
+                                 #   eth, ip, arp, and a full echo-request -> reply)
 python test/test_pcap_oracle.py  # host: the capture verifier, checked without QEMU
-python demo/build_demo.py capture   # boot MORT OS in QEMU, dump the TX frame to a pcap
+python demo/build_demo.py ping      # boot MORT OS in QEMU; ARP + ICMP round trip
+python demo/build_demo.py capture   # the M1 demo: transmit one frame
                                     # needs: pip install ziglang, and qemu-system-i386
 ```
 
@@ -25,7 +27,7 @@ Every milestone ends with something you can *see*. No milestone is done until it
 
 - [x] **M0 — Foundations** · packet buffer pools, byte-order helpers, Internet checksum — with golden-packet tests running on the host · *landed 2026-07-21: `net/buf.mx`, `net/endian.mx`, `net/checksum.mx`, 22 checks including a real IPv4 header verifying to `0xB861`*
 - [x] **M1 — NIC driver** · RTL8139 in QEMU: MORT OS transmits its first raw Ethernet frame · *landed 2026-07-21: `glue/rtl8139.mx` (PCI enumeration + polled TX), `net/eth.mx` (framing), and the `outl`/`inl` builtins added to [Mort](https://github.com/0xmortuex/Mort) for PCI config access. `python demo/build_demo.py capture` boots the demo kernel in QEMU and verifies the broadcast `MORTNET` frame (EtherType 0x88B5) in `build/capture.pcap` — dissected above.*
-- [ ] **M2 — ARP + ICMP** · *demo: `ping` gets an answer from MORT OS — screenshot goes right here*
+- [x] **M2 — ARP + ICMP** · MORT OS answers ARP and ICMP, and completes a ping · *landed 2026-07-21: `net/ip.mx`, `net/arp.mx`, `net/icmp.mx`, and `net/netcfg.mx`'s `net_handle_frame` dispatcher, plus the RX ring in `glue/rtl8139.mx`. Host tests forge a real echo request and assert the reply. `python demo/build_demo.py ping` captures the full ARP + ICMP round trip above.*
 - [ ] **M3 — IPv4 + UDP + DHCP** · *demo: MORT OS asks my home router for an IP address and gets one, by itself*
 - [ ] **M4 — DNS client** · *demo: `resolve example.com` from the MORT OS shell*
 - [ ] **M5 — TCP** · handshake, sliding window, retransmission, teardown — the boss fight · *demo: a Mort program opens a TCP connection to a real server*

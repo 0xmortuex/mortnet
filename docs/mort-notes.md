@@ -4,6 +4,28 @@ Building a network stack in a language you also wrote means every milestone
 stress-tests the language. This file collects what each milestone revealed —
 it doubles as a wishlist for the next Mort version.
 
+## From M2 (ARP + ICMP)
+
+1. **No modules, no imports — the stack is one giant translation unit.** mortc
+   compiles a single `.mx` file, so `build_demo.py` and `test/run_tests.py`
+   concatenate every `net/*.mx` (+ the driver, + one demo main) into one file
+   before compiling. It works because Mort emits all prototypes first, so call
+   order across "modules" doesn't matter — but there's no namespacing, and every
+   global (`g_our_ip`, `g_rtl_rxbuf`, ...) shares one flat scope. A real module
+   system (or even a documented multi-file compile) is the biggest missing
+   ergonomic feature now.
+
+2. **M2 needed no new language features.** After M1 added `inl/outl`, the whole
+   IPv4 + ARP + ICMP layer and the RX ring compiled with what Mort already had:
+   fixed-width ints, pointers, structs-free byte poking through `u64` addresses,
+   and `&&`/`||` in conditions. That's a good sign the core is capable — the
+   friction is now ergonomics (modules, `&arr[i]`, `const`), not capability.
+
+3. **`%` and unsigned wrap both behave.** The RX ring cursor uses
+   `(off + advance) % 8192` and `(off - 16) as u16` (deliberate wrap to 0xFFF0
+   for the card's CAPR quirk); both generated correct C. Handy to have
+   confirmed for the sliding-window arithmetic coming in M5 (TCP).
+
 ## From M1 (NIC driver)
 
 1. **The language was missing 32-bit port I/O.** Mort v0.7 had `inb/outb`

@@ -27,6 +27,13 @@ let g_rtl_tx: u32 = 0;          // next TX descriptor to use (0..3)
 // MORT OS, which runs with paging off (identity-mapped physical memory).
 let g_rtl_txbuf: [u8; 2048] = [0; 2048];
 
+// Receive ring: an 8 KB buffer the card DMAs incoming frames into, plus 16
+// bytes of header slack and ~1500 for a frame that straddles the end (the WRAP
+// bit lets the card run past the 8 KB mark rather than splitting a frame).
+let RTL_RX_SIZE: u32 = 8192;
+let g_rtl_rxbuf: [u8; 9728] = [0; 9728];
+let g_rtl_rx_offset: u32 = 0;   // our read cursor into the ring (0..8192)
+
 // ---- PCI configuration space (mechanism #1: ports 0xCF8 / 0xCFC) ----
 
 fn pci_addr(bus: u8, slot: u8, func: u8, off: u8) -> u32 {
@@ -95,12 +102,63 @@ fn rtl_init() -> bool {
         }
     }
 
-    // Enable the transmitter (TE = bit 2 of CR).
-    outb(g_rtl_io + 0x37, 0x04);
+    // Point the card at our receive ring (RBSTART = physical address).
+    outl(g_rtl_io + 0x30, &g_rtl_rxbuf as u32);
+    g_rtl_rx_offset = 0;
+
+    // Receive Configuration: accept broadcast + multicast + physical-match +
+    // all (promiscuous, simplest for a demo), and set WRAP so a frame near the
+    // end spills into the slack instead of being split. (AAP|AM|AB|APM|WRAP.)
+    outl(g_rtl_io + 0x44, 0x8F);
+
+    // Enable receiver and transmitter together (RE = bit 3, TE = bit 2).
+    outb(g_rtl_io + 0x37, 0x0C);
 
     g_rtl_tx = 0;
     g_rtl_ok = true;
     return true;
+}
+
+// Poll for one received frame. If one is waiting, copy it (minus the 4-byte
+// Ethernet CRC) into `out` and return its length; otherwise return 0.
+//
+// The card prefixes each frame in the ring with a 4-byte header: a receive
+// status word and the length (frame + CRC), both little-endian. After reading,
+// we advance our cursor (4-byte aligned) and hand it back to the card via CAPR,
+// which per the RTL8139's quirk must be set 16 bytes behind the read pointer.
+fn rtl_poll_rx(out: u64) -> u32 {
+    if !g_rtl_ok {
+        return 0;
+    }
+    // CR bit 0 (BUFE) set means the ring is empty.
+    if (inb(g_rtl_io + 0x37) & 0x01) != 0 {
+        return 0;
+    }
+
+    let ring: u64 = &g_rtl_rxbuf as u64;
+    let hdr: u64 = ring + (g_rtl_rx_offset as u64);
+    let status: u16 = le16_load(hdr);
+    let len: u16 = le16_load(hdr + 2);          // frame length including CRC
+
+    let frame_len: u32 = 0;
+    // Bit 0 of status (ROK) set and a sane length means a good frame.
+    if (status & 0x01) != 0 && (len as u32) >= 4 {
+        frame_len = (len as u32) - 4;           // strip the 4-byte CRC
+        for i: u32 in 0..frame_len {
+            let s: *u8 = (hdr + 4 + (i as u64)) as *u8;
+            let d: *u8 = (out + (i as u64)) as *u8;
+            *d = *s;
+        }
+    }
+
+    // Advance past this packet: 4-byte header + payload + CRC, rounded up to a
+    // 4-byte boundary, wrapped within the 8 KB ring.
+    let advance: u32 = ((len as u32) + 4 + 3) & 0xFFFFFFFC;
+    g_rtl_rx_offset = (g_rtl_rx_offset + advance) % RTL_RX_SIZE;
+
+    // Return ownership to the card (CAPR = read pointer - 16).
+    outw(g_rtl_io + 0x38, (g_rtl_rx_offset - 16) as u16);
+    return frame_len;
 }
 
 // Read the card's own MAC (IDR0..5) into a 6-byte region.

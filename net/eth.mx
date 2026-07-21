@@ -53,6 +53,16 @@ fn eth_type(buf: u64) -> u16 {
     return be16_load(buf + 12);
 }
 
+// Address of the destination MAC (offset 0) and source MAC (offset 6) of a
+// received frame — used when building a reply that goes back to the sender.
+fn eth_dst(buf: u64) -> u64 {
+    return buf;
+}
+
+fn eth_src(buf: u64) -> u64 {
+    return buf + 6;
+}
+
 // Address of the payload inside a frame (just past the 14-byte header).
 fn eth_payload(buf: u64) -> u64 {
     return buf + (ETH_HDR_LEN as u64);

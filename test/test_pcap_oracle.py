@@ -44,7 +44,7 @@ def main():
         path = os.path.join(tmp, f"oracle_{name}.pcap")
         with open(path, "wb") as fh:
             fh.write(data)
-        got = build_demo.verify_pcap(path)
+        got = build_demo.has_mortnet_frame(path)
         ok = (got == want)
         cases.append(ok)
         print(f"{'PASS' if ok else 'FAIL'}: {name} (oracle returned {got}, want {want})")

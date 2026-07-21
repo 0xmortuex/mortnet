@@ -41,6 +41,15 @@ fn be32_load(addr: u64) -> u32 {
     return ((be16_load(addr) as u32) << 16) | (be16_load(addr + 2) as u32);
 }
 
+// Read a little-endian 16-bit value from memory. Hardware that DMAs into RAM
+// (like the RTL8139's receive-packet header) writes in the CPU's native order,
+// which on x86 is little-endian — the opposite of on-the-wire byte order.
+fn le16_load(addr: u64) -> u16 {
+    let lo: *u8 = addr as *u8;
+    let hi: *u8 = (addr + 1) as *u8;
+    return (*lo as u16) | ((*hi as u16) << 8);
+}
+
 // Write a 32-bit value to memory in big-endian order.
 fn be32_store(addr: u64, v: u32) {
     be16_store(addr, (v >> 16) as u16);

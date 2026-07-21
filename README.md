@@ -6,17 +6,18 @@
 
 **mortnet** is a network stack for [MORT OS](https://github.com/0xmortuex/MortOS), written from scratch in [Mort](https://github.com/0xmortuex/Mort). No lwIP port, no borrowed stack, no library — every byte from the Ethernet frame up gets parsed by code I wrote, in a language I wrote.
 
-**Status: M3 landed** ✅ · started 2026-07-21 · MORT OS gets its IP address by itself, over DHCP
+**Status: M4 landed** ✅ · started 2026-07-21 · MORT OS resolves hostnames over real DNS
 
-<img src="docs/m3-dhcp.svg" width="880" alt="A captured DHCP handshake: MORT OS boots as 0.0.0.0, broadcasts DISCOVER, receives an OFFER of 10.0.2.15, REQUESTs it, receives ACK, and adopts the address — all four frames real, from build/capture.pcap." />
+<img src="docs/m4-dns.svg" width="880" alt="A captured DNS resolution: MORT OS finds the resolver 10.0.2.3 by ARP, sends an A query for example.com, and parses the answer to a real IPv4 address — all four frames real, from build/capture.pcap." />
 
-<sub>An actual DHCP handshake, captured from QEMU (`build/capture.pcap`). MORT OS boots with no address and completes the full DISCOVER/OFFER/REQUEST/ACK exchange against QEMU's server — UDP (with the pseudo-header checksum) and DHCP written from scratch in Mort.</sub>
+<sub>An actual DNS lookup, captured from QEMU (`build/capture.pcap`). MORT OS queries the resolver and parses the A record — following the compression pointer in the answer — to a real address (via SLIRP → the host's internet). UDP and DNS written from scratch in Mort.</sub>
 
 ```sh
-python test/run_tests.py         # host: 71 golden checks — endian, checksum, buf,
-                                 #   eth, ip, arp, icmp, udp, dhcp, echo-request->reply
+python test/run_tests.py         # host: 81 golden checks — endian, checksum, buf, eth,
+                                 #   ip, arp, icmp, udp, dhcp, dns, echo-request->reply
 python test/test_pcap_oracle.py  # host: the capture verifier, checked without QEMU
-python demo/build_demo.py dhcp      # boot MORT OS with no IP; DHCP DORA handshake
+python demo/build_demo.py dns       # boot MORT OS; resolve example.com over DNS
+python demo/build_demo.py dhcp      # M3: DHCP DORA handshake (boots with no IP)
 python demo/build_demo.py ping      # M2: ARP + ICMP round trip
 python demo/build_demo.py capture   # M1: transmit one frame
                                     # needs: pip install ziglang, and qemu-system-i386
@@ -30,7 +31,7 @@ Every milestone ends with something you can *see*. No milestone is done until it
 - [x] **M1 — NIC driver** · RTL8139 in QEMU: MORT OS transmits its first raw Ethernet frame · *landed 2026-07-21: `glue/rtl8139.mx` (PCI enumeration + polled TX), `net/eth.mx` (framing), and the `outl`/`inl` builtins added to [Mort](https://github.com/0xmortuex/Mort) for PCI config access. `python demo/build_demo.py capture` boots the demo kernel in QEMU and verifies the broadcast `MORTNET` frame (EtherType 0x88B5) in `build/capture.pcap` — dissected above.*
 - [x] **M2 — ARP + ICMP** · MORT OS answers ARP and ICMP, and completes a ping · *landed 2026-07-21: `net/ip.mx`, `net/arp.mx`, `net/icmp.mx`, and `net/netcfg.mx`'s `net_handle_frame` dispatcher, plus the RX ring in `glue/rtl8139.mx`. Host tests forge a real echo request and assert the reply. `python demo/build_demo.py ping` captures the full ARP + ICMP round trip above.*
 - [x] **M3 — IPv4 + UDP + DHCP** · MORT OS gets an IP by itself · *landed 2026-07-21: `net/udp.mx` (pseudo-header checksum) and `net/dhcp.mx` (DORA). Host tests build/parse every message; `python demo/build_demo.py dhcp` boots MORT OS with no address and captures the full handshake above, ending at 10.0.2.15.*
-- [ ] **M4 — DNS client** · *demo: `resolve example.com` from the MORT OS shell*
+- [x] **M4 — DNS client** · MORT OS resolves hostnames · *landed 2026-07-21: `net/dns.mx` — QNAME label encoding, response parsing with compression-pointer handling, first-A-record extraction. Host tests build a query and parse a golden response; `python demo/build_demo.py dns` resolves example.com live through QEMU's resolver, shown above.*
 - [ ] **M5 — TCP** · handshake, sliding window, retransmission, teardown — the boss fight · *demo: a Mort program opens a TCP connection to a real server*
 - [ ] **M6 — HTTP/1.1 server** · *demo: `curl http://<mortos-ip>/` returns a page — then the portfolio, from real hardware*
 

@@ -4,6 +4,26 @@ Building a network stack in a language you also wrote means every milestone
 stress-tests the language. This file collects what each milestone revealed —
 it doubles as a wishlist for the next Mort version.
 
+## From M4 (DNS)
+
+1. **No `break` or `continue`.** Mort's only loop exits are the condition and
+   `return`. DNS parsing is full of "scan until a sentinel" loops (label
+   walking, name skipping, answer iteration), so each became a `done` flag or a
+   nested flag-loop instead of a clean `while { ... break }`. It works and stays
+   readable, but `break`/`continue` would noticeably simplify parser code — and
+   there's a lot more of it coming in M5 (TCP) and M6 (HTTP).
+
+2. **No string type — hostnames are hand-laid `[u8; N]` byte arrays.** `"example.com"`
+   in a demo is written as `[101, 120, 97, ...]`. String literals exist as `*u8`
+   for `print_string`, but there's no way to write one into a local buffer or
+   index characters ergonomically. A `char` literal (`'e'`) and copying a string
+   literal into a buffer would remove the ASCII-code tables the demos carry.
+
+3. **Compression pointers parsed cleanly.** The one genuinely tricky part of DNS —
+   an answer NAME that's a 2-byte pointer (`0xC0 | offset`) back into the
+   question — needed only a top-two-bits check in `dns_skip_name`. Fixed-width
+   `u8`/`u16` and bit ops carried it without fuss.
+
 ## From M3 (UDP + DHCP)
 
 1. **`-O2` emits SSE, which triple-faults a bare-metal kernel.** The DHCP demo

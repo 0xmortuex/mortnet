@@ -45,6 +45,7 @@ NET_SOURCES = [
     os.path.join(ROOT, "net", "icmp.mx"),
     os.path.join(ROOT, "net", "arp.mx"),
     os.path.join(ROOT, "net", "dhcp.mx"),
+    os.path.join(ROOT, "net", "dns.mx"),
     os.path.join(ROOT, "net", "netcfg.mx"),
     os.path.join(ROOT, "glue", "rtl8139.mx"),
 ]
@@ -53,6 +54,7 @@ DEMOS = {
     "capture": os.path.join(HERE, "net_demo.mx"),    # M1: transmit one frame
     "ping": os.path.join(HERE, "ping_demo.mx"),      # M2: ARP + ICMP round trip
     "dhcp": os.path.join(HERE, "dhcp_demo.mx"),      # M3: DHCP DORA handshake
+    "dns": os.path.join(HERE, "dns_demo.mx"),        # M4: DNS A-record resolve
 }
 SOURCES = NET_SOURCES + [DEMOS["capture"]]
 
@@ -313,8 +315,88 @@ def dhcp():
     return 1
 
 
+def _udp_payload(frame, want_dport=None, want_sport=None):
+    """Return (src_port, dst_port, payload) for a UDP frame, or None."""
+    if len(frame) < 14 or struct.unpack(">H", frame[12:14])[0] != 0x0800:
+        return None
+    ip = frame[14:]
+    if len(ip) < 20 or ip[9] != 17:
+        return None
+    ihl = (ip[0] & 0x0F) * 4
+    udp = ip[ihl:]
+    if len(udp) < 8:
+        return None
+    sport, dport = struct.unpack(">H", udp[0:2])[0], struct.unpack(">H", udp[2:4])[0]
+    if want_dport is not None and dport != want_dport:
+        return None
+    if want_sport is not None and sport != want_sport:
+        return None
+    return sport, dport, udp[8:]
+
+
+def dns():
+    """M4: assert MORT OS sent a DNS query and parsed an A record from the reply."""
+    elf = build("dns")
+    _boot_and_capture(elf, min_frames=2)
+    frames = _frames(PCAP)
+
+    sent_query = False
+    answer_ip = None
+    for f in frames:
+        to53 = _udp_payload(f, want_dport=53)
+        if to53:
+            sent_query = True
+        from53 = _udp_payload(f, want_sport=53)
+        if from53:
+            dnsmsg = from53[2]
+            if len(dnsmsg) >= 12:
+                ancount = struct.unpack(">H", dnsmsg[6:8])[0]
+                # walk to the first A record (skip question, skip names)
+                ip = _first_a_record(dnsmsg, ancount)
+                if ip:
+                    answer_ip = ip
+    verdict = f"query sent={sent_query}  answer A record={'.'.join(map(str, answer_ip)) if answer_ip else None}"
+    print(f"      {verdict}")
+    if sent_query and answer_ip:
+        print(f"PASS: MORT OS resolved a hostname over DNS to {'.'.join(map(str, answer_ip))}.")
+        print(f"      Open it in Wireshark:  {os.path.relpath(PCAP, ROOT)}")
+        return 0
+    print("FAIL: expected a DNS query to :53 and an A record in the reply "
+          "(needs outbound DNS via SLIRP).")
+    return 1
+
+
+def _skip_name(msg, off):
+    while off < len(msg):
+        b = msg[off]
+        if b == 0:
+            return off + 1
+        if (b & 0xC0) == 0xC0:
+            return off + 2
+        off += 1 + b
+    return off
+
+
+def _first_a_record(msg, ancount):
+    """Mirror of net/dns.mx dns_first_a, for verifying the capture."""
+    if ancount == 0 or len(msg) < 12:
+        return None
+    off = _skip_name(msg, 12) + 4          # past question name + QTYPE/QCLASS
+    for _ in range(ancount):
+        off = _skip_name(msg, off)
+        if off + 10 > len(msg):
+            return None
+        atype = struct.unpack(">H", msg[off:off + 2])[0]
+        rdlength = struct.unpack(">H", msg[off + 8:off + 10])[0]
+        rdata = off + 10
+        if atype == 1 and rdlength == 4 and rdata + 4 <= len(msg):
+            return tuple(msg[rdata:rdata + 4])
+        off = rdata + rdlength
+    return None
+
+
 COMMANDS = {"build": build, "run": run, "capture": capture, "ping": ping,
-            "dhcp": dhcp}
+            "dhcp": dhcp, "dns": dns}
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "build"

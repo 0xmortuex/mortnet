@@ -18,7 +18,7 @@ python test/run_tests.py    # finds Mort via $MORT_HOME, ../Mort, or clones .mor
 Every milestone ends with something you can *see*. No milestone is done until its demo exists.
 
 - [x] **M0 — Foundations** · packet buffer pools, byte-order helpers, Internet checksum — with golden-packet tests running on the host · *landed 2026-07-21: `net/buf.mx`, `net/endian.mx`, `net/checksum.mx`, 22 checks including a real IPv4 header verifying to `0xB861`*
-- [ ] **M1 — NIC driver** · RTL8139 in QEMU: MORT OS transmits its first raw Ethernet frame — *demo: the frame in Wireshark*
+- [~] **M1 — NIC driver** · RTL8139 in QEMU: MORT OS transmits its first raw Ethernet frame — *demo: the frame in Wireshark* · *code complete: `glue/rtl8139.mx` (PCI probe + TX), `net/eth.mx` (framing, 9 host checks), and the `outl`/`inl` builtins added to [Mort](https://github.com/0xmortuex/Mort) for PCI config access. Demo kernel builds to a valid 32-bit multiboot ELF; `python demo/build_demo.py capture` boots it and dumps the frame to a pcap — awaiting a QEMU install to run live.*
 - [ ] **M2 — ARP + ICMP** · *demo: `ping` gets an answer from MORT OS — screenshot goes right here*
 - [ ] **M3 — IPv4 + UDP + DHCP** · *demo: MORT OS asks my home router for an IP address and gets one, by itself*
 - [ ] **M4 — DNS client** · *demo: `resolve example.com` from the MORT OS shell*

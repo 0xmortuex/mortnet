@@ -4,6 +4,25 @@ Building a network stack in a language you also wrote means every milestone
 stress-tests the language. This file collects what each milestone revealed —
 it doubles as a wishlist for the next Mort version.
 
+## From M1 (NIC driver)
+
+1. **The language was missing 32-bit port I/O.** Mort v0.7 had `inb/outb`
+   and `inw/outw`, but PCI configuration space is addressed through a dword
+   register pair on ports `0xCF8`/`0xCFC`, which needs `inl/outl`. Added them
+   to the compiler (typechecker + codegen, emitted only when used, 5 new
+   tests) — the first time mortnet drove a change to Mort itself. Committed
+   upstream in the Mort repo.
+
+2. **Pointer-to-`u32` casts warn but are correct on the 32-bit target.**
+   `&g_rtl_txbuf as u32` triggers `-Wpointer-to-int-cast`, exactly like the
+   MORT OS ATA driver's `buf as u32`. Harmless: the kernel is 32-bit with
+   identity-mapped memory, so a pointer *is* a `u32`. A future `--freestanding`
+   host-word-size note or a `ptr_addr()` intrinsic could silence it.
+
+3. **Polled TX needs no interrupts**, which let the demo kernel skip the
+   GDT/IDT entirely and use a 30-line boot stub — so the M1 demo is
+   self-contained in `demo/` and doesn't fork MORT OS's 1800-line kernel.
+
 ## From M0 (foundations)
 
 1. **`&arr[i]` is not addressable.** Mort v0.7 can take the address of a

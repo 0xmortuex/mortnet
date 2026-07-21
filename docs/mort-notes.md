@@ -4,6 +4,29 @@ Building a network stack in a language you also wrote means every milestone
 stress-tests the language. This file collects what each milestone revealed —
 it doubles as a wishlist for the next Mort version.
 
+## From M3 (UDP + DHCP)
+
+1. **`-O2` emits SSE, which triple-faults a bare-metal kernel.** The DHCP demo
+   has larger buffers, and at `-O2` the compiler vectorized a zero-init into
+   `xorps xmm0, xmm0` (`0f 57 c0`). The kernel runs with SSE disabled
+   (`CR4.OSFXSR = 0`) and, being a minimal demo, installs no IDT — so that one
+   instruction `#UD`s and, with no handler, cascades straight to a triple fault
+   and reboot loop. M1/M2 were small enough that the vectorizer never fired.
+   Fix: build freestanding with `-mno-sse -mno-sse2 -mno-mmx` so codegen stays
+   scalar. **This matters for the eventual MORT OS integration** — the real
+   kernel's `build.py` compiles `-O2` without these flags; it survives only
+   because its current code doesn't trip the vectorizer. Adding a big
+   packet-buffer memset could change that. Either add the flags there too, or
+   have `kernel_setup` enable SSE (set `CR4.OSFXSR`).
+
+2. **No struct-based headers — everything is byte pokes.** Without a way to
+   overlay a struct on a raw buffer (packed structs, pointer casts to a struct
+   type at an arbitrary address), every header field is a hand-written
+   `be16_store(buf + off, ...)`. It works and is explicit, but a `@packed`
+   struct mapped onto a `*u8` would cut the driver and protocol code in half
+   and remove a class of offset-arithmetic bugs. Biggest single win Mort could
+   hand mortnet.
+
 ## From M2 (ARP + ICMP)
 
 1. **No modules, no imports — the stack is one giant translation unit.** mortc

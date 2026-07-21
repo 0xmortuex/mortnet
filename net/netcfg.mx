@@ -16,6 +16,11 @@ fn net_set_mac(addr: u64) {
     mac_copy(&g_our_mac as u64, addr);
 }
 
+// Set our IPv4 address — hardcoded at boot, or learned from DHCP in M3.
+fn net_set_ip(addr: u64) {
+    ip4_copy(&g_our_ip as u64, addr);
+}
+
 fn net_our_mac() -> u64 { return &g_our_mac as u64; }
 fn net_our_ip() -> u64 { return &g_our_ip as u64; }
 

@@ -41,15 +41,18 @@ NET_SOURCES = [
     os.path.join(ROOT, "net", "checksum.mx"),
     os.path.join(ROOT, "net", "eth.mx"),
     os.path.join(ROOT, "net", "ip.mx"),
+    os.path.join(ROOT, "net", "udp.mx"),
     os.path.join(ROOT, "net", "icmp.mx"),
     os.path.join(ROOT, "net", "arp.mx"),
+    os.path.join(ROOT, "net", "dhcp.mx"),
     os.path.join(ROOT, "net", "netcfg.mx"),
     os.path.join(ROOT, "glue", "rtl8139.mx"),
 ]
-# The M1 hello demo and the M2 ping demo are separate kernels sharing the stack.
+# Each demo is a separate kernel sharing the same stack.
 DEMOS = {
     "capture": os.path.join(HERE, "net_demo.mx"),    # M1: transmit one frame
     "ping": os.path.join(HERE, "ping_demo.mx"),      # M2: ARP + ICMP round trip
+    "dhcp": os.path.join(HERE, "dhcp_demo.mx"),      # M3: DHCP DORA handshake
 }
 SOURCES = NET_SOURCES + [DEMOS["capture"]]
 
@@ -99,9 +102,12 @@ def build(demo="capture"):
     with open(demo_c, "w", encoding="utf-8") as fh:
         fh.write(mortc.compile_to_c(combined, freestanding=True))
 
+    # -mno-sse/-mmx: the kernel runs with SSE disabled (CR4.OSFXSR=0) and no
+    # IDT, so a single compiler-emitted xorps/movsd would #UD -> triple fault.
+    # Forbid vector codegen; the checksum/copy loops stay scalar.
     c_flags = ["-target", TARGET, "-ffreestanding", "-fno-stack-protector",
                "-fno-pie", "-fno-asynchronous-unwind-tables",
-               "-fno-unwind-tables", "-O2"]
+               "-fno-unwind-tables", "-mno-sse", "-mno-sse2", "-mno-mmx", "-O2"]
     demo_o = os.path.join(BUILD, f"{demo}.o")
     boot_o = os.path.join(BUILD, "boot.o")
     elf = os.path.join(BUILD, f"{demo}.elf")
@@ -119,9 +125,11 @@ def build(demo="capture"):
 
 def _qemu_net_args():
     # An emulated RTL8139 on a user-mode network, with every frame it sends or
-    # receives mirrored into a pcap file.
+    # receives mirrored into a pcap file. romfile= disables the card's iPXE boot
+    # ROM, so SeaBIOS boots our kernel immediately (no PXE-boot delay) and the
+    # capture holds only our stack's traffic, not iPXE's.
     return [
-        "-device", "rtl8139,netdev=n0",
+        "-device", "rtl8139,netdev=n0,romfile=",
         "-netdev", "user,id=n0",
         "-object", f"filter-dump,id=d0,netdev=n0,file={PCAP}",
     ]
@@ -252,7 +260,61 @@ def ping():
     return 1
 
 
-COMMANDS = {"build": build, "run": run, "capture": capture, "ping": ping}
+def _dhcp_msg_type(frame):
+    """The DHCP message-type option (53) in a frame, or None if it isn't a
+    DHCP packet (UDP 67<->68 with a magic cookie)."""
+    if len(frame) < 14 or struct.unpack(">H", frame[12:14])[0] != 0x0800:
+        return None
+    ip = frame[14:]
+    if len(ip) < 20 or ip[9] != 17:                       # not UDP
+        return None
+    ihl = (ip[0] & 0x0F) * 4
+    udp = ip[ihl:]
+    if len(udp) < 8:
+        return None
+    sport, dport = struct.unpack(">H", udp[0:2])[0], struct.unpack(">H", udp[2:4])[0]
+    if 67 not in (sport, dport) or 68 not in (sport, dport):
+        return None
+    dhcp = udp[8:]
+    if len(dhcp) < 240 or dhcp[236:240] != b"\x63\x82\x53\x63":   # magic cookie
+        return None
+    i = 240
+    while i < len(dhcp):
+        code = dhcp[i]
+        if code == 255:
+            break
+        if code == 0:
+            i += 1
+            continue
+        length = dhcp[i + 1]
+        if code == 53:
+            return dhcp[i + 2]
+        i += 2 + length
+    return None
+
+
+def dhcp():
+    """M3: assert MORT OS ran the DHCP handshake — DISCOVER, OFFER, REQUEST, ACK."""
+    elf = build("dhcp")
+    _boot_and_capture(elf, min_frames=4)
+    types = [_dhcp_msg_type(f) for f in _frames(PCAP)]
+    seen = set(t for t in types if t is not None)
+    names = {1: "DISCOVER", 2: "OFFER", 3: "REQUEST", 5: "ACK"}
+    got = ", ".join(names[t] for t in sorted(seen) if t in names) or "(none)"
+    print(f"      DHCP messages captured: {got}")
+    # We proved TX + parsing if we sent DISCOVER/REQUEST and the server answered
+    # OFFER/ACK (which MORT OS had to parse to proceed from one to the next).
+    if {1, 2, 3, 5} <= seen:
+        print("PASS: MORT OS earned its IP via DHCP — full DISCOVER/OFFER/"
+              "REQUEST/ACK handshake.")
+        print(f"      Open it in Wireshark:  {os.path.relpath(PCAP, ROOT)}")
+        return 0
+    print("FAIL: expected all four of DISCOVER, OFFER, REQUEST, ACK.")
+    return 1
+
+
+COMMANDS = {"build": build, "run": run, "capture": capture, "ping": ping,
+            "dhcp": dhcp}
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "build"

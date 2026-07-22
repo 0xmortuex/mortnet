@@ -4,6 +4,30 @@ Building a network stack in a language you also wrote means every milestone
 stress-tests the language. This file collects what each milestone revealed —
 it doubles as a wishlist for the next Mort version.
 
+## From M6 (HTTP server)
+
+1. **String literals saved the day — Mort escapes pass through to C.** The lexer
+   keeps `\r\n` verbatim and re-emits it into a C string literal, so
+   `"HTTP/1.1 200 OK\r\n"` is a real CRLF at runtime and `"..." as u64` gives its
+   address. That turned the HTTP response from hundreds of hand-typed ASCII codes
+   into readable text, and let the whole HTML page live as one literal. The
+   missing piece is only the inverse — no way to write a literal into a mutable
+   buffer without a copy loop, and no `char` literal for the request-parsing
+   comparisons (`*b == 71` instead of `*b == 'G'`).
+
+2. **The server (passive open) is the client state machine mirrored.** LISTEN →
+   SYN_RCVD → ESTABLISHED reused every piece of M5's segment layer; the only new
+   idea is learning the peer from the inbound SYN's source MAC/IP/port instead of
+   ARPing first. Answering ARP for our own IP (via `net_handle_frame`) is what
+   makes the guest reachable at all — the finale leans on M2's dispatcher.
+
+3. **Seven milestones, one language change.** M0 needed nothing; M1 added
+   `inl/outl`; M2–M6 added nothing. A NIC driver, ARP, ICMP, DHCP, DNS, a TCP
+   client and server, and an HTTP server — all in Mort as it was after the first
+   milestone. The standing wishlist for the language, in rough priority: a module
+   system, `match`, `break`/`continue`, `char`/string ergonomics, packed structs.
+   None were blockers; all would make the next stack half the size.
+
 ## From M5 (TCP)
 
 1. **The state machine wants a `match`/`switch` and `break`.** The connection

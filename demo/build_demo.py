@@ -47,6 +47,7 @@ NET_SOURCES = [
     os.path.join(ROOT, "net", "dhcp.mx"),
     os.path.join(ROOT, "net", "dns.mx"),
     os.path.join(ROOT, "net", "tcp.mx"),
+    os.path.join(ROOT, "net", "http.mx"),
     os.path.join(ROOT, "net", "netcfg.mx"),
     os.path.join(ROOT, "glue", "rtl8139.mx"),
 ]
@@ -57,6 +58,7 @@ DEMOS = {
     "dhcp": os.path.join(HERE, "dhcp_demo.mx"),      # M3: DHCP DORA handshake
     "dns": os.path.join(HERE, "dns_demo.mx"),        # M4: DNS A-record resolve
     "tcp": os.path.join(HERE, "tcp_demo.mx"),        # M5: TCP connection lifecycle
+    "http": os.path.join(HERE, "http_demo.mx"),      # M6: HTTP server (serves a page)
 }
 SOURCES = NET_SOURCES + [DEMOS["capture"]]
 
@@ -494,8 +496,60 @@ def tcp():
     return 1
 
 
+def http():
+    """M6 (finale): MORT OS listens on TCP 80 and serves a page. Boot it with a
+    host->guest port forward (8080 -> 80), then GET http://127.0.0.1:8080/ from
+    the host and verify MORT OS generated the response."""
+    import time
+    import urllib.request
+
+    elf = build("http")
+    qemu = _find_qemu()
+    if not qemu:
+        sys.exit("qemu-system-i386 not found — install QEMU to run the demo.")
+    if os.path.exists(PCAP):
+        os.remove(PCAP)
+
+    net_args = [
+        "-device", "rtl8139,netdev=n0,romfile=",
+        "-netdev", "user,id=n0,hostfwd=tcp:127.0.0.1:8080-10.0.2.15:80",
+        "-object", f"filter-dump,id=d0,netdev=n0,file={PCAP}",
+    ]
+    print("Booting MORT OS as an HTTP server (headless), forwarding :8080 -> :80 ...")
+    proc = subprocess.Popen([qemu, "-display", "none", "-kernel", elf, *net_args])
+
+    body = None
+    deadline = time.monotonic() + 30
+    try:
+        while time.monotonic() < deadline and body is None:
+            if proc.poll() is not None:
+                break
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:8080/", timeout=2) as r:
+                    body = r.read().decode("utf-8", "replace")
+            except Exception:
+                time.sleep(0.5)          # server not up yet (cold boot) — retry
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+    if body and "Served by MORT OS" in body:
+        first = body.splitlines()[0] if body.splitlines() else body[:40]
+        print(f"      GET / returned {len(body)} bytes; title line: {first[:60]!r}")
+        print("PASS: MORT OS served an HTTP page over its own TCP/IP stack.")
+        print(f"      Open it in a browser:  http://127.0.0.1:8080/  (while the server runs)")
+        return 0
+    print(f"FAIL: no valid page returned (got {body[:80]!r} )." if body
+          else "FAIL: the server never answered on :8080.")
+    return 1
+
+
 COMMANDS = {"build": build, "run": run, "capture": capture, "ping": ping,
-            "dhcp": dhcp, "dns": dns, "tcp": tcp}
+            "dhcp": dhcp, "dns": dns, "tcp": tcp, "http": http}
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "build"

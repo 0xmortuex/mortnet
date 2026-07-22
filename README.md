@@ -1,22 +1,23 @@
 # mortnet
 
-> My portfolio, served by my own web server, running on my own OS, written in my own language, over my own TCP/IP stack, on real hardware.
->
-> That's the finish line.
+> A web server written in my own language, running on an OS written in my own language, over a TCP/IP stack written in my own language.
 
 **mortnet** is a network stack for [MORT OS](https://github.com/0xmortuex/MortOS), written from scratch in [Mort](https://github.com/0xmortuex/Mort). No lwIP port, no borrowed stack, no library — every byte from the Ethernet frame up gets parsed by code I wrote, in a language I wrote.
 
-**Status: M5 landed** ✅ · started 2026-07-21 · MORT OS opens a real TCP connection — handshake, data, clean close
+**Status: complete** ✅ · M0 → M6, all seven milestones · started &amp; finished 2026-07-21
 
-<img src="docs/m5-tcp.svg" width="880" alt="A captured TCP connection from MORT OS: three-way handshake, MORT OS sends mortnet and the server replies HELLO-MORTNET, then a four-way close — all frames real, from build/capture.pcap." />
+This is the page MORT OS serves over HTTP, on its own TCP/IP stack — the whole staircase in one screenshot:
 
-<sub>An actual TCP connection, captured from QEMU (`build/capture.pcap`). MORT OS completes the three-way handshake, sends a request, ACKs the reply, and closes cleanly — sequence and acknowledgement numbers tracked the whole way. The host server it connected to received exactly `mortnet\n`. TCP written from scratch in Mort.</sub>
+<img src="docs/m6-served.png" width="880" alt="The web page MORT OS serves: 'Served by MORT OS — This page came from a web server written in Mort, running on an operating system written in Mort, over a TCP/IP stack written in Mort. NIC driver, ARP, IPv4, ICMP, UDP, DHCP, DNS, TCP, HTTP. Every layer, from scratch.'" />
+
+<sub><code>curl http://localhost:8080/</code> → MORT OS accepts the connection (a passive-open TCP handshake), reads the <code>GET</code>, and returns this page with a real <code>Server: mortnet</code> / <code>Content-Length</code> response. The finish line: a web server, an OS, and a TCP/IP stack, all in one language whose compiler is a few thousand lines of Python.</sub>
 
 ```sh
-python test/run_tests.py         # host: 91 golden checks — endian, checksum, buf, eth,
-                                 #   ip, arp, icmp, udp, dhcp, dns, tcp, echo-reply
+python test/run_tests.py         # host: 98 golden checks — endian, checksum, buf, eth,
+                                 #   ip, arp, icmp, udp, dhcp, dns, tcp, http, echo-reply
 python test/test_pcap_oracle.py  # host: the capture verifier, checked without QEMU
-python demo/build_demo.py tcp       # boot MORT OS; open a TCP connection to a host server
+python demo/build_demo.py http      # boot MORT OS as an HTTP server; GET it from the host
+python demo/build_demo.py tcp       # M5: open a TCP connection to a host server
 python demo/build_demo.py dns       # M4: resolve example.com over DNS
 python demo/build_demo.py dhcp      # M3: DHCP DORA handshake (boots with no IP)
 python demo/build_demo.py ping      # M2: ARP + ICMP round trip
@@ -34,7 +35,7 @@ Every milestone ends with something you can *see*. No milestone is done until it
 - [x] **M3 — IPv4 + UDP + DHCP** · MORT OS gets an IP by itself · *landed 2026-07-21: `net/udp.mx` (pseudo-header checksum) and `net/dhcp.mx` (DORA). Host tests build/parse every message; `python demo/build_demo.py dhcp` boots MORT OS with no address and captures the full handshake above, ending at 10.0.2.15.*
 - [x] **M4 — DNS client** · MORT OS resolves hostnames · *landed 2026-07-21: `net/dns.mx` — QNAME label encoding, response parsing with compression-pointer handling, first-A-record extraction. Host tests build a query and parse a golden response; `python demo/build_demo.py dns` resolves example.com live through QEMU's resolver, shown above.*
 - [x] **M5 — TCP** · handshake, sequence tracking, teardown — the boss fight · *landed 2026-07-21: `net/tcp.mx` (segment build/parse + pseudo-header checksum) and a connection state machine in `demo/tcp_demo.mx`. Host tests verify the segment layer; `python demo/build_demo.py tcp` has MORT OS connect to a host server through SLIRP, exchange data, and close — the server confirms it received `mortnet\n`. Captured above.*
-- [ ] **M6 — HTTP/1.1 server** · *demo: `curl http://<mortos-ip>/` returns a page — then the portfolio, from real hardware*
+- [x] **M6 — HTTP/1.1 server** · MORT OS serves a page · *landed 2026-07-21: `net/http.mx` (response builder using Mort string literals) and the passive-open TCP path (LISTEN → SYN_RCVD → ESTABLISHED) in `demo/http_demo.mx`. `python demo/build_demo.py http` boots MORT OS listening on :80 (forwarded to the host's :8080); a real HTTP GET returns the page shown at the top.*
 
 ## Architecture
 

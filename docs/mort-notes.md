@@ -4,6 +4,27 @@ Building a network stack in a language you also wrote means every milestone
 stress-tests the language. This file collects what each milestone revealed —
 it doubles as a wishlist for the next Mort version.
 
+## From M5 (TCP)
+
+1. **The state machine wants a `match`/`switch` and `break`.** The connection
+   loop is a tower of nested `if`s keyed on `(state, flags)`, because Mort has
+   neither multi-way branching nor loop `break`. It's correct and it fit, but a
+   `match state { ... }` plus labelled exits would make the ESTABLISHED/close
+   logic read the way the RFC state diagram looks. This is the clearest case yet
+   for both features.
+
+2. **32-bit sequence arithmetic just works** — `g_snd_nxt = g_snd_nxt + len`
+   with `u32` wraparound is exactly TCP's model, and comparing `their_ack ==
+   g_snd_nxt` needed no special modular-compare helper for this simple client
+   (a full stack handling reordering/wrap would want `seq_lt` helpers, but the
+   width and wrap semantics are already right).
+
+3. **Still no new language features needed.** Four milestones running now
+   (M2–M5) with zero additions to Mort after M1's `inl/outl`. The stack is
+   real: ARP, ICMP, DHCP, DNS, and a TCP connection, all in a language whose
+   compiler is a few thousand lines of Python. What's missing is ergonomics
+   (modules, `match`, `break`, strings, packed structs), not power.
+
 ## From M4 (DNS)
 
 1. **No `break` or `continue`.** Mort's only loop exits are the condition and

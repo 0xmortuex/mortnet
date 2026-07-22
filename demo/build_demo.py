@@ -46,6 +46,7 @@ NET_SOURCES = [
     os.path.join(ROOT, "net", "arp.mx"),
     os.path.join(ROOT, "net", "dhcp.mx"),
     os.path.join(ROOT, "net", "dns.mx"),
+    os.path.join(ROOT, "net", "tcp.mx"),
     os.path.join(ROOT, "net", "netcfg.mx"),
     os.path.join(ROOT, "glue", "rtl8139.mx"),
 ]
@@ -55,6 +56,7 @@ DEMOS = {
     "ping": os.path.join(HERE, "ping_demo.mx"),      # M2: ARP + ICMP round trip
     "dhcp": os.path.join(HERE, "dhcp_demo.mx"),      # M3: DHCP DORA handshake
     "dns": os.path.join(HERE, "dns_demo.mx"),        # M4: DNS A-record resolve
+    "tcp": os.path.join(HERE, "tcp_demo.mx"),        # M5: TCP connection lifecycle
 }
 SOURCES = NET_SOURCES + [DEMOS["capture"]]
 
@@ -395,8 +397,105 @@ def _first_a_record(msg, ancount):
     return None
 
 
+def _tcp_flag_names(f):
+    names = []
+    for bit, name in ((0x02, "SYN"), (0x10, "ACK"), (0x08, "PSH"),
+                      (0x01, "FIN"), (0x04, "RST")):
+        if f & bit:
+            names.append(name)
+    return "|".join(names) or "-"
+
+
+def tcp():
+    """M5: run a host TCP server (reached from the guest via SLIRP at 10.0.2.2),
+    have MORT OS connect, and verify the handshake + data + close, plus that the
+    server actually received MORT OS's request bytes."""
+    import socket
+    import threading
+
+    result = {"got": None, "connected": False}
+
+    def server():
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 8888))
+        srv.listen(1)
+        srv.settimeout(20)
+        try:
+            conn, _addr = srv.accept()
+        except OSError:
+            srv.close()
+            return
+        result["connected"] = True
+        conn.settimeout(8)
+        try:
+            result["got"] = conn.recv(1024)
+            conn.sendall(b"HELLO-MORTNET\n")
+        except OSError:
+            pass
+        try:
+            conn.close()
+        except OSError:
+            pass
+        srv.close()
+
+    th = threading.Thread(target=server, daemon=True)
+    th.start()
+
+    elf = build("tcp")
+    _boot_and_capture(elf, min_frames=6)      # SYN, SYN-ACK, ACK, data x2, FINs
+    th.join(timeout=3)
+
+    # Classify the captured TCP segments between our port (40001) and 8888.
+    frames = _frames(PCAP)
+    seen = {"syn": False, "synack": False, "our_data": False,
+            "server_data": False, "fin_from_us": False}
+    for f in frames:
+        if len(f) < 34 or struct.unpack(">H", f[12:14])[0] != 0x0800:
+            continue
+        ip = f[14:]
+        if len(ip) < 20 or ip[9] != 6:                        # not TCP
+            continue
+        ihl = (ip[0] & 0x0F) * 4
+        tcp_seg = ip[ihl:]
+        if len(tcp_seg) < 20:
+            continue
+        sport, dport = struct.unpack(">H", tcp_seg[0:2])[0], struct.unpack(">H", tcp_seg[2:4])[0]
+        flags = tcp_seg[13]
+        doff = (tcp_seg[12] >> 4) * 4
+        payload = tcp_seg[doff:]
+        outbound = sport == 40001
+        if flags & 0x02 and not (flags & 0x10) and outbound:
+            seen["syn"] = True
+        if (flags & 0x02) and (flags & 0x10) and not outbound:
+            seen["synack"] = True
+        if outbound and payload:
+            seen["our_data"] = True
+        if (not outbound) and payload:
+            seen["server_data"] = True
+        if (flags & 0x01) and outbound:
+            seen["fin_from_us"] = True
+
+    got = result["got"]
+    print(f"      handshake: SYN={seen['syn']} SYN-ACK={seen['synack']}  "
+          f"data out={seen['our_data']} in={seen['server_data']}  "
+          f"our FIN={seen['fin_from_us']}")
+    print(f"      host server received from MORT OS: {got!r}")
+
+    handshake_ok = seen["syn"] and seen["synack"]
+    data_ok = got == b"mortnet\n" and seen["server_data"]
+    if handshake_ok and data_ok and seen["fin_from_us"]:
+        print("PASS: MORT OS opened a TCP connection, exchanged data, and closed "
+              "cleanly. The host server received exactly what MORT OS sent.")
+        print(f"      Open it in Wireshark:  {os.path.relpath(PCAP, ROOT)}")
+        return 0
+    print("FAIL: expected full handshake, bidirectional data ('mortnet\\n' at the "
+          "server), and a FIN from MORT OS.")
+    return 1
+
+
 COMMANDS = {"build": build, "run": run, "capture": capture, "ping": ping,
-            "dhcp": dhcp, "dns": dns}
+            "dhcp": dhcp, "dns": dns, "tcp": tcp}
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "build"

@@ -8,8 +8,8 @@
 //! expect: 5
 
 fn main() -> int {
-    // str_len / u32_to_dec basics.
-    print(str_len("abc" as u64) as i64);            // 3
+    // http_strlen / u32_to_dec basics.
+    print(http_strlen("abc" as u64) as i64);        // 3
 
     let numbuf: [u8; 8] = [0; 8];
     let nb: u64 = &numbuf as u64;

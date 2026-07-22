@@ -6,7 +6,7 @@
 // through to C, so "HTTP/1.1 200 OK\r\n" carries a real CRLF — no byte tables
 // needed. Addresses are u64 to match the rest of the stack.
 
-fn str_len(s: u64) -> u32 {
+fn http_strlen(s: u64) -> u32 {
     let i: u32 = 0;
     while true {
         let c: *u8 = (s + (i as u64)) as *u8;
@@ -19,7 +19,7 @@ fn str_len(s: u64) -> u32 {
 }
 
 // Copy src (up to its NUL) to dst; return the number of bytes copied.
-fn str_copy(dst: u64, src: u64) -> u32 {
+fn http_strcopy(dst: u64, src: u64) -> u32 {
     let i: u32 = 0;
     while true {
         let c: *u8 = (src + (i as u64)) as *u8;
@@ -62,14 +62,14 @@ fn u32_to_dec(dst: u64, v: u32) -> u32 {
 // with a correct Content-Length. Returns the total response length.
 fn http_build_response(buf: u64, body: u64) -> u32 {
     let out: u32 = 0;
-    out = out + str_copy(buf + (out as u64), "HTTP/1.1 200 OK\r\n" as u64);
-    out = out + str_copy(buf + (out as u64), "Server: mortnet\r\n" as u64);
-    out = out + str_copy(buf + (out as u64), "Content-Type: text/html\r\n" as u64);
-    out = out + str_copy(buf + (out as u64), "Content-Length: " as u64);
-    let blen: u32 = str_len(body);
+    out = out + http_strcopy(buf + (out as u64), "HTTP/1.1 200 OK\r\n" as u64);
+    out = out + http_strcopy(buf + (out as u64), "Server: mortnet\r\n" as u64);
+    out = out + http_strcopy(buf + (out as u64), "Content-Type: text/html\r\n" as u64);
+    out = out + http_strcopy(buf + (out as u64), "Content-Length: " as u64);
+    let blen: u32 = http_strlen(body);
     out = out + u32_to_dec(buf + (out as u64), blen);
-    out = out + str_copy(buf + (out as u64), "\r\n" as u64);
-    out = out + str_copy(buf + (out as u64), "Connection: close\r\n\r\n" as u64);
+    out = out + http_strcopy(buf + (out as u64), "\r\n" as u64);
+    out = out + http_strcopy(buf + (out as u64), "Connection: close\r\n\r\n" as u64);
     for i: u32 in 0..blen {
         let s: *u8 = (body + (i as u64)) as *u8;
         let d: *u8 = (buf + (out as u64) + (i as u64)) as *u8;

@@ -25,6 +25,12 @@ python demo/build_demo.py capture   # M1: transmit one frame
                                     # needs: pip install ziglang, and qemu-system-i386
 ```
 
+## On MORT OS, on real hardware
+
+The stack is vendored into [MORT OS](https://github.com/0xmortuex/MortOS) (`net/*.mx`, compiled into the kernel) and driven by two shell commands: `net` brings up the RTL8139 and leases an address over DHCP; `httpd` serves the page on port 80. Build a bootable, USB-writable ISO with `python build.py iso` in the MORT OS repo, write it to a stick (`Rufus`, or `dd if=mort.iso of=/dev/sdX`), and boot a real PC. Verified end to end in QEMU — on both the `-kernel` path and a booted ISO with an emulated RTL8139 — where `net` binds `10.0.2.15` and a host `curl` returns the page.
+
+> **Hardware note.** The driver targets the **RTL8139** NIC. QEMU emulates one; most modern PCs don't have one (they ship RTL8168/8111 or Intel), so on bare metal you need an RTL8139 — a ~$5 PCI card. The OS itself boots and runs on any x86 machine; only the networking is card-specific.
+
 ## The staircase
 
 Every milestone ends with something you can *see*. No milestone is done until its demo exists.
